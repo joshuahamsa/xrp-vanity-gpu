@@ -35,6 +35,17 @@ def _validate_pattern(pattern: str, case_sensitive: bool) -> None:
         )
 
 
+class _SerialSieve:
+    """Single-process adapter so --sieve serial matches the pool interface."""
+
+    def sieve_batch(self, pubkeys, seeds, pattern, case_sensitive, first_attempt_index):
+        return sieve.sieve_batch(pubkeys, seeds, pattern, case_sensitive,
+                                 first_attempt_index)
+
+    def close(self) -> None:
+        pass
+
+
 def _emit_match(m: sieve.Match, out_fh) -> None:
     ts = dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     line = f"[{ts}] MATCH  {m.address}  seed={m.seed_b58}  (attempt {m.attempt:,})"
@@ -55,14 +66,22 @@ def main() -> int:
     p.add_argument("--stats-interval", type=float, default=5.0)
     p.add_argument("--seed-rng-seed", type=int, default=None)
     p.add_argument("--workers", type=int, default=0,
-                   help="sieve worker processes (0 = all CPU cores)")
+                   help="sieve worker count (0 = all CPU cores)")
+    p.add_argument("--sieve", choices=["c", "parallel", "serial"], default="c",
+                   help="sieve backend (default: c)")
     args = p.parse_args()
 
     _validate_pattern(args.pattern, args.case_sensitive)
 
     rng = np.random.default_rng(args.seed_rng_seed)
     g = gpu.VanityGpu(batch_size=args.batch_size)
-    ps = sieve.ParallelSieve(n_workers=args.workers or None)
+    if args.sieve == "c":
+        from vanity import csieve
+        ps = csieve.CSieve(n_workers=args.workers or None)
+    elif args.sieve == "parallel":
+        ps = sieve.ParallelSieve(n_workers=args.workers or None)
+    else:
+        ps = _SerialSieve()
     sp = stats.StatsPrinter(interval_sec=args.stats_interval)
 
     out_fh = open(args.out, "a") if args.out else None

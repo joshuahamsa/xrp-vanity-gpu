@@ -17,7 +17,8 @@ conda run -n rapids-23.12 python xrp_vanity_gpu.py PATTERN [options]
 |---|---|---|
 | `--case-sensitive` | off | exact-case prefix match |
 | `--batch-size N` | 1048576 | seeds derived per GPU launch |
-| `--workers N` | 0 (all cores) | CPU sieve processes |
+| `--sieve {c,parallel,serial}` | c | sieve backend (C/OpenMP, multiprocessing, or single-process) |
+| `--workers N` | 0 (all cores) | sieve thread/process count |
 | `--max-matches N` | 0 (until Ctrl-C) | stop after N hits |
 | `--out FILE` | — | append matches to FILE |
 | `--stats-interval S` | 5.0 | seconds between throughput lines |
@@ -34,19 +35,24 @@ off also accepts upper/lowercase variants.
 - **CPU** (`vanity/sieve.py`): SHA-256 + RIPEMD-160 -> account_id -> base58check
   address -> prefix match, fanned across all cores by `ParallelSieve`.
 
-The CPU sieve is the throughput bottleneck (pure-Python base58check), so it runs
-in a persistent multiprocessing pool while the GPU pipeline stays well ahead.
+The sieve, not the GPU, was the bottleneck. The default `c` backend
+(`vanity/csieve.c`) does the whole sieve — SHA-256, RIPEMD-160, base58check,
+prefix compare — in C with OpenMP across all cores, compiled on first import and
+loaded via `ctypes`. The pure-Python backends (`parallel`, `serial`) remain for
+reference and testing.
 
 ## Throughput (RTX 2060 Super, 20-core CPU)
 
-| Stage | Rate |
+| Stage / backend | Rate |
 |---|---|
 | GPU pipeline | ~4.6M seeds/s |
-| CPU sieve, single core | ~31K/s |
-| CPU sieve, 20 cores | ~283K/s |
-| End-to-end CLI | ~280-310K/s |
+| Python sieve, single core (`serial`) | ~31K/s |
+| Python sieve, 20 cores (`parallel`) | ~283K/s |
+| C/OpenMP sieve, 20 cores (`c`) | ~3.7M/s |
+| **End-to-end CLI (`c`)** | **~2.2M/s** |
 
-~3x the ~100K/s Java CPU baseline.
+~22x the ~100K/s Java CPU baseline. The serial loop interleaves GPU and sieve;
+double-buffering them (planned) lifts the ceiling toward the ~3.7M/s sieve rate.
 
 ## Layout
 
