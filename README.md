@@ -30,21 +30,27 @@ No NVIDIA GPU → this tool will not work for you. There is no AMD/Metal/CPU por
 
 ## Setup
 
-The reference environment is a conda env (the RAPIDS image ships a compatible
-CuPy/CUDA), but any environment with the deps above and a matching CuPy works.
+The kernels are compiled at runtime with NVRTC, so CuPy needs **both** the CUDA
+runtime libraries (incl. `libnvrtc.so`) **and** the CUDA headers. The reliable,
+self-contained way to get all of that is to install CuPy from conda-forge, which
+bundles a matching CUDA toolkit:
 
 ```bash
-conda create -n xrpvanity python=3.10
+conda create -n xrpvanity -c conda-forge python=3.10 cupy
 conda activate xrpvanity
-pip install cupy-cuda12x nvidia-cuda-nvrtc-cu12 xrpl-py pycryptodome numpy
+pip install xrpl-py pycryptodome
 ```
 
-The `cupy-cuda12x` wheel does **not** bundle CUDA's libraries — it expects them
-present. The kernels are compiled at runtime with NVRTC, so you need
-`libnvrtc.so`. If you don't already have a system CUDA 12.x toolkit on your
-library path, the `nvidia-cuda-nvrtc-cu12` wheel provides it (otherwise CuPy
-fails with `DynamicLibNotFoundError: Failure finding "libnvrtc.so"` even though
-it can see the GPU).
+That's it — `conda-forge`'s `cupy` pulls in the CUDA runtime *and* headers, so
+no system CUDA toolkit and no `CUDA_PATH` fiddling is required.
+
+> **Avoid the bare pip-wheel route on a machine without a CUDA toolkit.**
+> `pip install cupy-cuda12x` gives CuPy the runtime but not the headers, so even
+> with the GPU detected you hit either
+> `DynamicLibNotFoundError: Failure finding "libnvrtc.so"` or
+> `RuntimeError: Failed to auto-detect CUDA root directory`. If you must use the
+> wheels, also install a full CUDA 12.x toolkit (with headers) and point
+> `CUDA_PATH` at it.
 
 Verify CuPy sees your GPU before running:
 
