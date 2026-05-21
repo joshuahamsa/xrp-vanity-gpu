@@ -35,6 +35,18 @@ def _validate_pattern(pattern: str, case_sensitive: bool) -> None:
         )
 
 
+def _match_from_seed(seed16: bytes, attempt: int) -> sieve.Match:
+    """Rebuild a Match for a GPU-reported hit, verifying via xrpl-py."""
+    from xrpl.core.keypairs import derive_classic_address, derive_keypair
+    seed_b58 = encoding.family_seed_encode(seed16)
+    pub_hex, _ = derive_keypair(seed_b58)
+    return sieve.Match(
+        seed_b58=seed_b58,
+        address=derive_classic_address(pub_hex),
+        attempt=attempt,
+    )
+
+
 def _emit_match(m: sieve.Match, out_fh) -> None:
     ts = dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     line = f"[{ts}] MATCH  {m.address}  seed={m.seed_b58}  (attempt {m.attempt:,})"
@@ -54,16 +66,16 @@ def main() -> int:
                    help="0 = run until Ctrl-C")
     p.add_argument("--stats-interval", type=float, default=5.0)
     p.add_argument("--seed-rng-seed", type=int, default=None)
-    p.add_argument("--workers", type=int, default=0,
-                   help="sieve worker processes (0 = all CPU cores)")
     args = p.parse_args()
 
     _validate_pattern(args.pattern, args.case_sensitive)
 
     rng = np.random.default_rng(args.seed_rng_seed)
     g = gpu.VanityGpu(batch_size=args.batch_size)
-    ps = sieve.ParallelSieve(n_workers=args.workers or None)
     sp = stats.StatsPrinter(interval_sec=args.stats_interval)
+
+    needle = (args.pattern if args.case_sensitive
+              else args.pattern.lower()).encode("ascii")
 
     out_fh = open(args.out, "a") if args.out else None
     stopping = False
@@ -78,16 +90,11 @@ def main() -> int:
     try:
         while not stopping:
             seeds = rng.bytes(args.batch_size * 16)
-            pubkeys = g.run_batch(seeds)
-            hits = ps.sieve_batch(
-                pubkeys=pubkeys,
-                seeds=seeds,
-                pattern=args.pattern,
-                case_sensitive=args.case_sensitive,
-                first_attempt_index=attempt,
-            )
-            for h in hits:
-                _emit_match(h, out_fh)
+            idx = g.sieve_seeds(seeds, needle, args.case_sensitive)
+            for i in idx:
+                i = int(i)
+                m = _match_from_seed(seeds[i * 16 : (i + 1) * 16], attempt + i)
+                _emit_match(m, out_fh)
                 sp.add_match()
                 matches_found += 1
                 if args.max_matches and matches_found >= args.max_matches:
@@ -98,7 +105,6 @@ def main() -> int:
             if line is not None:
                 print(line, flush=True)
     finally:
-        ps.close()
         if out_fh is not None:
             out_fh.close()
         final = sp.tick(processed=0, force_emit=True)

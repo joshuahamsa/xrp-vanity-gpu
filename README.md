@@ -27,26 +27,35 @@ Only the base58 alphabet is legal in `PATTERN`
 (`rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz`); `--case-sensitive`
 off also accepts upper/lowercase variants.
 
-## Architecture: hybrid GPU/CPU
+## Architecture: all-GPU
 
-- **GPU** (`kernels/`, `vanity/gpu.py`): seed16 -> double SHA-512 + Ed25519 clamp
-  -> scalar-mult base point -> packed 33-byte pubkey. Compiled once via CuPy NVRTC.
-- **CPU** (`vanity/sieve.py`): SHA-256 + RIPEMD-160 -> account_id -> base58check
-  address -> prefix match, fanned across all cores by `ParallelSieve`.
+Both stages run on the GPU as two kernels sharing an on-device pubkey buffer; only
+a tiny list of matching indices returns to the host.
 
-The CPU sieve is the throughput bottleneck (pure-Python base58check), so it runs
-in a persistent multiprocessing pool while the GPU pipeline stays well ahead.
+- **`pipeline`** (`kernels/pipeline_kernel.cu` + `ed25519_kernel.cu`): seed16 ->
+  double SHA-512 + Ed25519 clamp -> scalar-mult base point -> packed 33-byte
+  pubkey, written to a device buffer.
+- **`sieve_pubkeys`** (`kernels/sieve_kernel.cu`): SHA-256 + RIPEMD-160 ->
+  account_id -> base58check address -> prefix compare, `atomicAdd`-ing matching
+  indices into a small device list.
+
+The two are compiled as **separate** CuPy modules — combining them into one
+translation unit makes ptxas spin for >15 min (the Ed25519 scalarmult plus the
+hash chain blow up optimization). Apart, the Ed25519 module is CuPy-cached after
+its first build and the sieve module compiles in seconds. The CPU only rebuilds
+the rare hits and verifies each against xrpl-py.
+
+The `vanity/sieve.py` Python sieve and its `ParallelSieve` remain for testing —
+`test_gpu_sieve.py` asserts the GPU sieve's match set is identical to theirs.
 
 ## Throughput (RTX 2060 Super, 20-core CPU)
 
-| Stage | Rate |
+| Pipeline | Rate |
 |---|---|
-| GPU pipeline | ~4.6M seeds/s |
-| CPU sieve, single core | ~31K/s |
-| CPU sieve, 20 cores | ~283K/s |
-| End-to-end CLI | ~280-310K/s |
+| Hybrid (GPU derive + readback + Python sieve) | ~0.28M/s |
+| **All-GPU sieve** | **~6.1M/s** |
 
-~3x the ~100K/s Java CPU baseline.
+~61x the ~100K/s Java CPU baseline.
 
 ## Layout
 
