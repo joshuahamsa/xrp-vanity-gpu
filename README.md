@@ -41,24 +41,20 @@ conda activate xrpvanity
 pip install xrpl-py pycryptodome
 ```
 
-That's it — `conda-forge`'s `cupy` pulls in the CUDA runtime *and* headers, so
-no system CUDA toolkit and no `CUDA_PATH` fiddling is required.
+That's it — `conda-forge`'s `cupy` pulls in the CUDA runtime *and* headers under
+the env prefix, and CuPy auto-detects them. **Activate the env before running**
+(`conda activate xrpvanity`): CuPy derives its CUDA path from `CONDA_PREFIX`, so
+calling the env's Python by absolute path without activating will fail.
 
-### Alternative: pip wheels
-
-This also works on a machine with no system CUDA toolkit, but you must include
-the **nvcc** wheel — without it CuPy can find the GPU yet fails to compile:
-
-```bash
-pip install cupy-cuda12x nvidia-cuda-nvcc-cu12 xrpl-py pycryptodome numpy
-```
-
-`nvidia-cuda-nvcc-cu12` provides a CUDA root (and pulls in NVRTC) so CuPy can
-auto-detect it — no `CUDA_PATH` needed. Common failures from an incomplete set:
-
-- `DynamicLibNotFoundError: Failure finding "libnvrtc.so"` — NVRTC missing.
-- `RuntimeError: Failed to auto-detect CUDA root directory` — install
-  `nvidia-cuda-nvcc-cu12` (the `nvidia-cuda-nvrtc-cu12` wheel alone is not enough).
+> **Don't mix conda-forge `cupy` with the pip `cupy-cuda12x` wheel** — layering
+> them produces a broken env (two CUDA stacks, `libnvrtc.so` not found). Pick one.
+>
+> The bare pip-wheel route (`pip install cupy-cuda12x`) is **not recommended** on
+> a machine without a CUDA toolkit: recent CuPy (14.x) cannot auto-detect a CUDA
+> root from the split `nvidia-*-cu12` wheels and fails with
+> `Failed to auto-detect CUDA root directory` (or `Failure finding "libnvrtc.so"`
+> if NVRTC is absent). If you must use wheels, install a full CUDA 12.x toolkit
+> with headers and set `CUDA_PATH`.
 
 Verify CuPy sees your GPU before running:
 
