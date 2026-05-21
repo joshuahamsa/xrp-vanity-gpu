@@ -34,11 +34,17 @@ The reference environment is a conda env (the RAPIDS image ships a compatible
 CuPy/CUDA), but any environment with the deps above and a matching CuPy works.
 
 ```bash
-# Example using the development conda env:
 conda create -n xrpvanity python=3.10
 conda activate xrpvanity
-pip install cupy-cuda12x xrpl-py pycryptodome numpy
+pip install cupy-cuda12x nvidia-cuda-nvrtc-cu12 xrpl-py pycryptodome numpy
 ```
+
+The `cupy-cuda12x` wheel does **not** bundle CUDA's libraries — it expects them
+present. The kernels are compiled at runtime with NVRTC, so you need
+`libnvrtc.so`. If you don't already have a system CUDA 12.x toolkit on your
+library path, the `nvidia-cuda-nvrtc-cu12` wheel provides it (otherwise CuPy
+fails with `DynamicLibNotFoundError: Failure finding "libnvrtc.so"` even though
+it can see the GPU).
 
 Verify CuPy sees your GPU before running:
 
